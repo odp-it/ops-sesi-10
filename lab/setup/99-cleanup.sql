@@ -1,4 +1,4 @@
--- Hapus semua objek latihan sesi 10 (opsional, setelah kelas). Jalankan sebagai SYSDBA:
+-- Hapus semua objek latihan sesi 10 (opsional, setelah selesai). Jalankan sebagai SYSDBA:
 --   docker cp setup/99-cleanup.sql oracle-xe:/tmp/99-cleanup.sql
 --   docker exec -it oracle-xe sqlplus / as sysdba @/tmp/99-cleanup.sql
 -- Menghapus user OPS_LAB beserta semua tabelnya, OPS_VIEWER, OPS_AGENT, OPS_AUDITOR (Lab), dan ketiga role.

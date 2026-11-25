@@ -1,18 +1,18 @@
-> Buka folder ini untuk bagian ini. Semua path relatif terhadap folder ini. Persiapan, troubleshooting, dan cleanup: [README utama](../README.md).
+# Lab · Pemulihan Insiden Operasi
 
-# Lab · Pemulihan Insiden Operasi (±35 menit, lanjut setelah kelas)
+[Persiapan](../README.md) · [Troubleshooting](../TROUBLESHOOTING.md)
 
 **Skenario.** Senin pagi, tim operasi menerima lima laporan setelah shift akhir pekan (fiktif): data tiket tidak konsisten karena skrip manual dijalankan tanpa transaksi, satu tiket berpindah operator tanpa sepengetahuan pemegangnya, tiket yang sudah `CLOSED` bisa dibuka lagi, audit menemukan role operator punya hak `UPDATE` dan `DELETE` langsung, dan laporan antrean di dashboard lambat. Tim bertugas sebagai DBA piket: perbaiki, cegah terulang, dan buktikan.
 
 Satu laptop per tim, schema `OPS_LAB` milik laptop itu. Prasyarat: role dari 3.1 sudah dibuat, dan data bulk dari 4.2 sudah dimuat (`JUMLAH_INCIDENT 200030`; kalau belum, jalankan `../demo-4/05-bulk-incident.sql`).
 
-## L1. Pasang insiden (±2 menit)
+## L1. Pasang insiden
 
 1. Pastikan tidak ada transaksi terbuka (`COMMIT` atau `ROLLBACK` di semua tab).
 2. Buka `00-insiden.sql`, koneksi `OPS_LAB @ XEPDB1`, **F5**. Yang harus terlihat: `Insiden terpasang.`, lima tiket dalam keadaan rusak, dan `JUMLAH_INCIDENT 200030`. Skrip ini aman diulang: menjalankannya lagi mengembalikan insiden dari awal dan menghapus objek Lab sebelumnya.
 3. Salin `perbaikan-tim.sql` menjadi `perbaikan-<nama-tim>.sql`, `admin-auditor-tim.sql` menjadi `admin-auditor-<nama-tim>.sql`, dan `laporan-insiden-tim.md` menjadi `laporan-insiden-<nama-tim>.md`.
 
-## A. Pemulihan data, satu transaksi (±8 menit)
+## A. Pemulihan data, satu transaksi
 
 Aturan data yang berlaku untuk tiket:
 
@@ -25,7 +25,7 @@ Aturan data yang berlaku untuk tiket:
 
 Kerjakan dalam satu transaksi: `SAVEPOINT`, perbaiki, jalankan query pencari pelanggaran (harus 0 baris), baru `COMMIT`. Jangan menghapus tiket atau baris `incident_log`.
 
-## B. Serah terima aman: handover_incident (±8 menit)
+## B. Serah terima aman: handover_incident
 
 Buat procedure `handover_incident(p_incident_no IN VARCHAR2, p_from_operator IN VARCHAR2, p_to_operator IN VARCHAR2)`:
 
@@ -36,12 +36,12 @@ Buat procedure `handover_incident(p_incident_no IN VARCHAR2, p_from_operator IN 
 
 Uji dari dua session dengan `INC-SIM-0012` (dipegang `op.andi`) dan catat di laporan: A menjalankan serah terima ke `op.sari` tanpa `COMMIT`; B menjalankan serah terima `op.andi` ke `op.dewi` (menunggu); A `COMMIT`; catat apa yang diterima B. Akhiri dengan `ROLLBACK` di B.
 
-## C. Penjaga data (±4 menit)
+## C. Penjaga data
 
 1. Function `active_incident_count(p_service_code IN VARCHAR2) RETURN NUMBER`: jumlah tiket `OPEN` dan `IN_PROGRESS` untuk kode layanan itu; kode yang tidak dikenal menghasilkan `0`.
 2. Trigger `trg_incident_guard` (`BEFORE UPDATE`, `FOR EACH ROW`): status `CLOSED` tidak boleh berubah lagi (`RAISE_APPLICATION_ERROR`). Perubahan kolom lain dan perubahan status tiket lain tetap boleh.
 
-## D. Hak akses minimum (±4 menit)
+## D. Hak akses minimum
 
 1. Cari hak berlebih di `USER_TAB_PRIVS_MADE`, lalu cabut **hanya** yang berlebih: `OPS_OPERATOR` tidak boleh `INSERT`, `UPDATE`, `DELETE` di `incident`; `OPS_READONLY` tidak boleh membaca `incident` dan `incident_log`. `SELECT` di `incident` untuk `OPS_OPERATOR` tetap ada.
 2. `OPS_OPERATOR` boleh `EXECUTE` `handover_incident`.
@@ -54,7 +54,7 @@ docker exec -it oracle-xe sqlplus / as sysdba @/tmp/admin-auditor.sql
 
 4. Pemilik tabel: view `v_incident_audit` (`incident_no`, `status`, `priority`, `assigned_to`, `updated_at`; tanpa `summary`), lalu `GRANT SELECT` hanya di `incident_log` dan `v_incident_audit` kepada `ops_audit`.
 
-## E. Laporan antrean yang lambat (±4 menit)
+## E. Laporan antrean yang lambat
 
 Query dashboard (ada di `perbaikan-tim.sql`) menampilkan tiket `IN_PROGRESS` layanan `service_id = 3` yang dibuka pada September 2026. Catat plan sebelumnya (`EXPLAIN PLAN`). Lalu buat view `v_laporan_antrean` dengan hasil **sama persis** (kolom `incident_no`, `priority`, `assigned_to`, `opened_at`) yang ditulis supaya bisa memakai index, dan buat index composite dengan nama berawalan `idx_lab_`. Catat operation dan cost sesudahnya.
 
@@ -78,12 +78,12 @@ Yang harus terlihat: tabel poin per kriteria, `Subtotal otomatis` (maks. 80), da
 | C. Penjaga data | 12 | `cek-lab.sql` | `active_incident_count` benar untuk 6 kode (5), tiket `CLOSED` tidak bisa dibuka (5), perubahan sah tetap jalan (2) |
 | D. Hak akses | 16 | `cek-lab.sql` | Tanpa DML langsung operator (4), operator tetap `SELECT` + `EXECUTE` handover (3), readonly tanpa `incident` dan log (2), user dan role auditor (3), auditor hanya dua hak baca (3), hak sistem hanya `CREATE SESSION` (1) |
 | E. Laporan antrean | 14 | `cek-lab.sql` | Hasil view sama (4), plan memakai index `idx_lab_` tanpa full scan (6), cost plan paling tinggi 150 (4) |
-| Laporan insiden | 10 | Instruktur atau tim lain | Akar masalah, perintah inti, dan bukti sebelum/sesudah tiap temuan, termasuk letak `SAVEPOINT` dan `COMMIT` |
-| Uji dua session | 6 | Instruktur atau tim lain | Session B menunggu, lalu ditolak setelah A `COMMIT`; satu kalimat alasan |
-| Lab bisa diulang | 4 | Instruktur atau tim lain | `00-insiden.sql` lalu `perbaikan-<nama-tim>.sql` dijalankan lagi dari awal tanpa error |
+| Laporan insiden | 10 | Review tim lain | Akar masalah, perintah inti, dan bukti sebelum/sesudah tiap temuan, termasuk letak `SAVEPOINT` dan `COMMIT` |
+| Uji dua session | 6 | Review tim lain | Session B menunggu, lalu ditolak setelah A `COMMIT`; satu kalimat alasan |
+| Lab bisa diulang | 4 | Review tim lain | `00-insiden.sql` lalu `perbaikan-<nama-tim>.sql` dijalankan lagi dari awal tanpa error |
 | **Total** | **100** | | |
 
-Skor kurang dari 60 setelah waktu kelas habis: lanjutkan setelah kelas sampai memenuhi rubrik. Tugas lanjutan tidak dikumpulkan; cek sendiri dengan `cek-lab.sql` dan rubrik di atas.
+Target minimal 60 poin. Cek sendiri dengan `cek-lab.sql` dan rubrik di atas.
 
 Akun `OPS_AUDITOR` bisa diuji dengan koneksi baru: `SELECT` dari `ops_lab.incident_log` dan `ops_lab.v_incident_audit` berhasil, `SELECT` dari `ops_lab.incident` ditolak `ORA-00942`, `UPDATE ops_lab.v_incident_audit` ditolak `ORA-01031`.
 
@@ -92,4 +92,4 @@ Akun `OPS_AUDITOR` bisa diuji dengan koneksi baru: `SELECT` dari `ops_lab.incide
 1. (+5) Covering index `idx_lab_cover` untuk laporan antrean, sehingga `EXPLAIN PLAN` dari `v_laporan_antrean` hanya `INDEX RANGE SCAN` tanpa `TABLE ACCESS`. Catat cost sebelum dan sesudahnya, lalu hapus index ini setelah dicatat.
 2. (+5) Procedure `claim_next_incident(p_operator, p_incident_no OUT)` yang mengambil tiket `OPEN` asli (bukan data bulk) terdepan menurut prioritas lalu waktu buka, memakai cursor `FOR UPDATE SKIP LOCKED`, tanpa `COMMIT`. Uji dua session: keduanya mendapat tiket berbeda tanpa saling tunggu. Akhiri dengan `ROLLBACK`.
 
-Bonus dinilai instruktur atau tim lain.
+Bonus dinilai lewat review.
